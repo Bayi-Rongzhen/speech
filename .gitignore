@@ -34,5 +34,10 @@ yarn-error.log*
 next-env.d.ts
 /dist/
 /.wrangler/
+*.tsbuildinfo
 /outputs/
 /work/
+
+# Claude Code local session state
+.claude/worktrees/
+.claude/settings.local.json
