@@ -9,13 +9,17 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "test": "node --experimental-strip-types --test app/lib/scoring.test.ts"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .claude/worktrees",
+    "test": "node --experimental-strip-types --test app/lib/scoring.test.ts app/lib/domain/coaching.test.ts app/features/audio-analysis/analyze.test.ts app/lib/schemas/ai-provider.test.ts app/lib/server/ai-relay.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.121.0",
+    "@huggingface/transformers": "^4.2.0",
     "next": "^16.3.3",
+    "openai": "^7.7.0",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
