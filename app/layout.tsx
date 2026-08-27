@@ -2,7 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'http://localhost:3000'),
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? 'https://jiangqingchu.a13436654036.chatgpt.site',
+  ),
   title: '讲清楚｜限时学习与演说训练',
   description: '用约二十分钟完成限时学习、录音演说、针对性反馈和同题重讲，让表达进步听得见。',
   openGraph: {
