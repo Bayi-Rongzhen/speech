@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import ProviderSettings from './features/ai-provider/provider-settings';
 import TopicBuilder from './features/topics/topic-builder';
+import { useTopicLibrary } from './features/topics/hooks/use-topic-library';
 import { useAiFeedback } from './features/training/hooks/use-ai-feedback';
 import { useLocalProcessing } from './features/training/hooks/use-local-processing';
 import { useRecorder } from './features/training/hooks/use-recorder';
@@ -104,6 +105,11 @@ export default function SpeechCoach() {
   const { history, historyReady, commitHistory, averageScore, completeLoops, setHistory, dimensionTrends } = useTrainingHistory(
     () => setStorageMessage('浏览器未能保存记录，请先复制讲稿或检查可用空间。'),
   );
+
+  const { generatedTopics, busy: topicLibraryBusy, error: topicLibraryError, generateTopic, removeTopic } = useTopicLibrary();
+  const weakestDimension = dimensionTrends
+    .filter((trend) => trend.trend === 'down')
+    .sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0))[0];
 
   const {
     recorderStatus, recordSeconds, setRecordSeconds, transcript, setTranscript, interimTranscript,
@@ -211,6 +217,11 @@ export default function SpeechCoach() {
     resetAttemptInput();
     setScreen('speak');
     scrollTop();
+  };
+
+  const generateNewTopic = async () => {
+    const topic = await generateTopic(weakestDimension?.label);
+    if (topic) startTraining(topicIndex, topic);
   };
 
   const loadExample = () => {
@@ -459,7 +470,31 @@ export default function SpeechCoach() {
           </article>
         ))}
       </div>
-      <div className="center-actions"><button className="primary-action compact" type="button" onClick={() => goTo('topic-builder')}>创建自定义题目 <span>→</span></button></div>
+      {generatedTopics.length > 0 && (
+        <div className="generated-topics">
+          <div className="column-title"><h2>AI 生成的题目</h2><span>保存在本机，可重复练习</span></div>
+          <div className="topic-grid">
+            {generatedTopics.map((item) => (
+              <article className="topic-card generated" key={item.id}>
+                <div className="topic-card-top">
+                  <span>{item.category}</span>
+                  <button type="button" className="remove-topic" onClick={() => removeTopic(item.id)} aria-label={`移除生成的题目：${item.title}`}>移除</button>
+                </div>
+                <h2>{item.title}</h2>
+                <p>面向：{item.audience}</p>
+                <div className="topic-card-meta"><span>{item.prepMinutes} 分钟准备</span><span>{Math.round(item.speechSeconds / 60)} 分钟演说</span></div>
+                <button type="button" onClick={() => startTraining(topicIndex, item)}>选择这道题 <span>→</span></button>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+      <div className="center-actions">
+        <button className="primary-action compact" type="button" onClick={generateNewTopic} disabled={topicLibraryBusy}>{topicLibraryBusy ? '正在生成新题目…' : 'AI 出一个新题 🎲'} <span>→</span></button>
+        <button className="primary-action compact light" type="button" onClick={() => goTo('topic-builder')}>创建自定义题目 <span>→</span></button>
+      </div>
+      {weakestDimension && <p className="topic-hint">新题目会优先考验「{weakestDimension.label}」——你最近这项进步最需要关注。</p>}
+      {topicLibraryError && <div className="notice error" role="alert">{topicLibraryError}</div>}
       <div className="simulation-note"><strong>预设题与真实资料</strong><p>预设题仍使用模拟资料，适合稳定比较；也可以导入自己的材料，或生成保留网页引用的自定义训练题。</p></div>
     </section>
   );

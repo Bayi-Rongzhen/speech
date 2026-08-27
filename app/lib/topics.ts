@@ -1,5 +1,10 @@
 import type { Topic } from './types';
 
+export const TOPIC_CATEGORIES = [
+  '教育 · 科技', '职场 · 管理', '城市 · 公共服务', '社区 · 生活', '产品 · 伦理', '校园 · 环保',
+  '医疗 · 健康', '交通 · 出行', '数据 · 隐私', '消费 · 商业', '环境 · 气候', '媒体 · 舆论',
+];
+
 export const TOPICS: Topic[] = [
   {
     id: 'ai-homework',

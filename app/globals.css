@@ -335,7 +335,13 @@ a { color: inherit; }
 .retry-banner h2 { margin: 0; font-family: Georgia, "Noto Serif SC", serif; font-size: 33px; font-weight: 600; }
 .retry-banner p { margin: 9px 0 0; color: rgba(255, 255, 255, .66); font-size: 12px; }
 .retry-banner .section-kicker { color: var(--lime); }
-.center-actions { display: flex; justify-content: center; margin-top: 12px; }
+.center-actions { display: flex; justify-content: center; gap: 14px; margin-top: 12px; flex-wrap: wrap; }
+.generated-topics { margin-top: 46px; }
+.generated-topics .topic-grid { margin-top: 22px; }
+.topic-card.generated .topic-card-top { color: var(--green); }
+.remove-topic { min-height: 30px; padding: 0 6px; border: 0; background: transparent; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 0; }
+.remove-topic:hover { color: #9a7468; }
+.topic-hint { max-width: 560px; margin: 14px auto 0; color: var(--muted); font-size: 12px; text-align: center; }
 
 .compare-hero { display: grid; grid-template-columns: auto 1fr auto; gap: 32px; align-items: center; max-width: 1030px; margin: 0 auto 52px; }
 .celebration-mark { width: 80px; height: 80px; display: grid; place-items: center; border-radius: 50%; background: var(--lime); color: var(--green-deep); font-family: Georgia, serif; font-size: 38px; }

@@ -1,8 +1,37 @@
+import { TopicSnapshotSchema, type TopicSnapshot } from './schemas/topic';
 import type { TrainingRecord } from './types';
 
 export const HISTORY_STORAGE_KEY = 'jiangqingchu.history.v1';
+export const GENERATED_TOPICS_STORAGE_KEY = 'jiangqingchu.generated-topics.v1';
 const AUDIO_DB = 'jiangqingchu-audio-v1';
 const AUDIO_STORE = 'recordings';
+const MAX_GENERATED_TOPICS = 20;
+
+export function loadGeneratedTopics(): TopicSnapshot[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(GENERATED_TOPICS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      const result = TopicSnapshotSchema.safeParse(item);
+      return result.success ? [result.data] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
+export function saveGeneratedTopics(topics: TopicSnapshot[]) {
+  if (typeof window === 'undefined') return false;
+  try {
+    window.localStorage.setItem(GENERATED_TOPICS_STORAGE_KEY, JSON.stringify(topics.slice(0, MAX_GENERATED_TOPICS)));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function loadHistory(): TrainingRecord[] {
   if (typeof window === 'undefined') return [];
