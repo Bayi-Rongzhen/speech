@@ -2,39 +2,24 @@
 
 /* eslint-disable react-hooks/refs -- Media and object-URL refs are read only from user event handlers and lifecycle callbacks. */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import ProviderSettings from './features/ai-provider/provider-settings';
+import TopicBuilder from './features/topics/topic-builder';
+import { useAiFeedback } from './features/training/hooks/use-ai-feedback';
+import { useLocalProcessing } from './features/training/hooks/use-local-processing';
+import { useRecorder } from './features/training/hooks/use-recorder';
+import { useTrainingHistory } from './features/training/hooks/use-training-history';
+import { attemptsComparable } from './lib/domain/comparability';
+import { fromTopicSnapshot } from './lib/domain/topics';
 import { countSpeechUnits, estimateDuration, scoreSpeech } from './lib/scoring';
-import { clearLocalData, deleteStoredAudio, getStoredAudio, HISTORY_STORAGE_KEY, loadHistory, saveHistory, storeAudio } from './lib/storage';
+import { clearLocalData, deleteStoredAudio, getStoredAudio, loadHistory, storeAudio } from './lib/storage';
 import { TOPICS } from './lib/topics';
 import type { AttemptRecord, DimensionKey, Topic, TrainingRecord } from './lib/types';
 
-type Screen = 'home' | 'topics' | 'progress' | 'prepare' | 'speak' | 'report' | 'compare';
-type RecorderStatus = 'idle' | 'requesting' | 'recording' | 'paused' | 'stopped' | 'manual' | 'error';
-
-type RecognitionAlternative = { transcript: string };
-type RecognitionResult = { isFinal: boolean; 0: RecognitionAlternative; length: number };
-type RecognitionEvent = { resultIndex: number; results: ArrayLike<RecognitionResult> };
-type RecognitionErrorEvent = { error: string };
-type RecognitionInstance = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onresult: ((event: RecognitionEvent) => void) | null;
-  onerror: ((event: RecognitionErrorEvent) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-};
-type RecognitionConstructor = new () => RecognitionInstance;
-type SpeechWindow = Window & {
-  SpeechRecognition?: RecognitionConstructor;
-  webkitSpeechRecognition?: RecognitionConstructor;
-};
+type Screen = 'home' | 'topics' | 'topic-builder' | 'ai-settings' | 'progress' | 'prepare' | 'speak' | 'report' | 'compare';
 
 const createId = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const createPrepDeadline = (minutes: number) => Date.now() + minutes * 60 * 1000;
-const monotonicNow = () => performance.now();
 
 const formatTime = (seconds: number) => {
   const safe = Math.max(0, Math.round(seconds));
@@ -49,28 +34,13 @@ const formatDate = (iso: string) => {
   }).format(date);
 };
 
-const attemptsComparable = (first: AttemptRecord | undefined, latest: AttemptRecord | undefined) => Boolean(
-  first && latest
-  && first.score.rubricVersion === latest.score.rubricVersion
-  && first.topicVersion === latest.topicVersion
-  && first.targetSeconds === latest.targetSeconds
-  && first.transcriptSource === latest.transcriptSource
-  && first.score.metrics.durationEstimated === latest.score.metrics.durationEstimated,
-);
-
-const getRecognitionConstructor = () => {
-  if (typeof window === 'undefined') return null;
-  const speechWindow = window as SpeechWindow;
-  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
-};
-
 const sampleTranscript = (topic: Topic) => `各位${topic.audience}的老师和代表，关于“${topic.title}”，我的建议是不要简单地全面允许或全面禁止，而是先设定清楚的规则，再进行一段时间的试点。首先，${topic.sources[0].body} 这意味着我们确实面对一个需要解决的现实问题，但单一数字还不能直接替我们作决定。其次，${topic.sources[1].body} 从这份资料可以看到，方案真正的价值不只是短期便利，而是能否改善长期结果。同时，我们也不能回避反方最强的担忧：${topic.sources[2].body} 因此，我建议把试点范围、评估指标和退出条件同时写进方案。第一，明确哪些场景可以使用，哪些场景必须保留原有方式；第二，在八到十二周后，根据实际效果、使用体验和潜在风险进行复盘；第三，为特殊需求保留清楚、方便的例外。总之，我支持的是一个可以验证、可以调整、也可以停止的方案。这样既不回避变化，也不会让所有人一次性承担未经验证的风险。`;
 
 const dimensionTone: Record<DimensionKey, string> = {
   content: 'forest', structure: 'orange', evidence: 'lime', clarity: 'blue', delivery: 'rose', timing: 'sand',
 };
 
-function AppHeader({ screen, onNavigate }: { screen: Screen; onNavigate: (next: Screen) => void }) {
+function AppHeader({ screen, onNavigate, providerReady }: { screen: Screen; onNavigate: (next: Screen) => void; providerReady: boolean }) {
   const practiceActive = screen === 'home' || ['prepare', 'speak', 'report', 'compare'].includes(screen);
   return (
     <header className="app-header">
@@ -81,9 +51,9 @@ function AppHeader({ screen, onNavigate }: { screen: Screen; onNavigate: (next: 
       <nav className="app-nav" aria-label="主导航">
         <button className={practiceActive ? 'active' : ''} aria-current={practiceActive ? 'page' : undefined} onClick={() => onNavigate('home')}>练习</button>
         <button className={screen === 'progress' ? 'active' : ''} aria-current={screen === 'progress' ? 'page' : undefined} onClick={() => onNavigate('progress')}>成长</button>
-        <button className={screen === 'topics' ? 'active' : ''} aria-current={screen === 'topics' ? 'page' : undefined} onClick={() => onNavigate('topics')}>题库</button>
+        <button className={screen === 'topics' || screen === 'topic-builder' ? 'active' : ''} aria-current={screen === 'topics' || screen === 'topic-builder' ? 'page' : undefined} onClick={() => onNavigate('topics')}>题库</button>
       </nav>
-      <button className="profile" type="button" onClick={() => onNavigate('progress')} aria-label="查看本地训练记录">本地</button>
+      <button className="profile" type="button" onClick={() => onNavigate('ai-settings')} aria-label="配置 AI 服务">{providerReady ? 'AI' : '设置'}</button>
     </header>
   );
 }
@@ -112,61 +82,56 @@ function Notices({ error, info, onDismiss }: { error: string; info: string; onDi
 export default function SpeechCoach() {
   const [screen, setScreen] = useState<Screen>('home');
   const [topicIndex, setTopicIndex] = useState(0);
-  const topic = TOPICS[topicIndex];
-  const [history, setHistory] = useState<TrainingRecord[]>([]);
-  const [historyReady, setHistoryReady] = useState(false);
+  const [customTopic, setCustomTopic] = useState<Topic | null>(null);
+  const topic = customTopic ?? TOPICS[topicIndex];
   const [trainingId, setTrainingId] = useState('');
   const [notes, setNotes] = useState('');
   const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
   const [prepEndsAt, setPrepEndsAt] = useState<number | null>(null);
   const [prepRemaining, setPrepRemaining] = useState(topic.prepMinutes * 60);
   const [prepExpired, setPrepExpired] = useState(false);
-  const [recorderStatus, setRecorderStatus] = useState<RecorderStatus>('idle');
-  const [recordSeconds, setRecordSeconds] = useState(0);
-  const [transcript, setTranscript] = useState('');
-  const [interimTranscript, setInterimTranscript] = useState('');
-  const [transcriptSource, setTranscriptSource] = useState<AttemptRecord['transcriptSource']>('manual');
-  const [autoTranscript, setAutoTranscript] = useState(false);
-  const [saveRecordingLocally, setSaveRecordingLocally] = useState(true);
-  const [recognitionSupported, setRecognitionSupported] = useState(false);
-  const [transcriptionInterrupted, setTranscriptionInterrupted] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [playbackId, setPlaybackId] = useState<string | null>(null);
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [storageMessage, setStorageMessage] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const recognitionRef = useRef<RecognitionInstance | null>(null);
-  const finalTranscriptRef = useRef('');
-  const recordStartRef = useRef(0);
-  const pauseStartRef = useRef(0);
-  const pausedTotalRef = useRef(0);
-  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const recordingActiveRef = useRef(false);
-  const discardOnStopRef = useRef(false);
-  const permissionRequestRef = useRef(0);
-  const permissionPendingRef = useRef(false);
-  const recognitionGenerationRef = useRef(0);
-  const recorderFailedRef = useRef(false);
-  const audioUrlRef = useRef<string | null>(null);
   const playbackUrlRef = useRef<string | null>(null);
   const mainRef = useRef<HTMLElement | null>(null);
   const initialScreenRef = useRef(true);
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setHistory(loadHistory());
-      setHistoryReady(true);
-      setRecognitionSupported(Boolean(getRecognitionConstructor()));
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+  const { history, historyReady, commitHistory, averageScore, completeLoops, setHistory } = useTrainingHistory(
+    () => setStorageMessage('浏览器未能保存记录，请先复制讲稿或检查可用空间。'),
+  );
+
+  const {
+    recorderStatus, recordSeconds, setRecordSeconds, transcript, setTranscript, interimTranscript,
+    transcriptSource, setTranscriptSource, autoTranscript, setAutoTranscript,
+    saveRecordingLocally, setSaveRecordingLocally, recognitionSupported, transcriptionInterrupted,
+    audioBlob, setAudioBlob, audioUrl, finalTranscriptRef, recordingActiveRef,
+    startRecording, pauseRecording, resumeRecording, finishRecording,
+    chooseManualMode: releaseIntoManualMode, releaseRecorder, reset: resetRecorder, replaceAudioUrl,
+  } = useRecorder({ targetSeconds: topic.speechSeconds, onError: setErrorMessage, onInfo: setStorageMessage });
+
+  const {
+    enabled: localTranscriptionEnabled, setEnabled: setLocalTranscriptionEnabled,
+    progress: transcriptionProgress, insights: audioInsights,
+    process: processLocalAudioBlob, cancel: cancelLocalProcessing, reset: resetLocalProcessing,
+  } = useLocalProcessing({
+    onTranscript: (text) => {
+      setTranscript(text);
+      finalTranscriptRef.current = text;
+      setTranscriptSource('local-whisper');
+    },
+    onError: setErrorMessage,
+    onInfo: setStorageMessage,
+  });
+
+  const {
+    provider: aiProvider, setProvider: setAiProvider, consent: aiConsent, setConsent: setAiConsent,
+    analyzing: aiAnalyzing, error: aiError, setError: setAiError,
+    requestFeedback, clearProvider: clearAiProvider,
+  } = useAiFeedback();
 
   useEffect(() => {
     if (initialScreenRef.current) {
@@ -175,14 +140,6 @@ export default function SpeechCoach() {
     }
     mainRef.current?.focus({ preventScroll: true });
   }, [screen]);
-
-  useEffect(() => {
-    const syncOtherTab = (event: StorageEvent) => {
-      if (event.key === HISTORY_STORAGE_KEY) setHistory(loadHistory());
-    };
-    window.addEventListener('storage', syncOtherTab);
-    return () => window.removeEventListener('storage', syncOtherTab);
-  }, []);
 
   useEffect(() => {
     if (screen !== 'prepare' || !prepEndsAt) return;
@@ -196,59 +153,11 @@ export default function SpeechCoach() {
     return () => window.clearInterval(timer);
   }, [screen, prepEndsAt]);
 
-  useEffect(() => {
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (!recordingActiveRef.current) return;
-      event.preventDefault();
-    };
-    window.addEventListener('beforeunload', beforeUnload);
-    return () => window.removeEventListener('beforeunload', beforeUnload);
-  }, []);
-
-  useEffect(() => {
-    const stopWhenBackgrounded = () => {
-      if (document.visibilityState === 'hidden' && permissionPendingRef.current) {
-        permissionRequestRef.current += 1;
-        permissionPendingRef.current = false;
-        setRecorderStatus('idle');
-        setStorageMessage('页面进入后台，麦克风授权请求已取消。');
-      }
-      if (document.visibilityState !== 'hidden' || !recordingActiveRef.current) return;
-      const recorder = mediaRecorderRef.current;
-      if (!recorder || recorder.state === 'inactive') return;
-      discardOnStopRef.current = false;
-      setStorageMessage('页面进入后台，录音已自动结束并保留；返回后请检查录音和讲稿。');
-      recorder.stop();
-    };
-    document.addEventListener('visibilitychange', stopWhenBackgrounded);
-    return () => document.removeEventListener('visibilitychange', stopWhenBackgrounded);
-  }, []);
-
   useEffect(() => () => {
-    permissionRequestRef.current += 1;
-    recognitionGenerationRef.current += 1;
-    discardOnStopRef.current = true;
-    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-    recognitionRef.current?.abort();
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
   }, []);
 
   const scrollTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
-
-  const commitHistory = (next: TrainingRecord[]) => {
-    setHistory(next);
-    const saved = saveHistory(next);
-    if (!saved) setStorageMessage('浏览器未能保存记录，请先复制讲稿或检查可用空间。');
-    return saved;
-  };
-
-  const replaceAudioUrl = (next: string | null) => {
-    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-    audioUrlRef.current = next;
-    setAudioUrl(next);
-  };
 
   const replacePlaybackUrl = (next: string | null) => {
     if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
@@ -256,55 +165,19 @@ export default function SpeechCoach() {
     setPlaybackUrl(next);
   };
 
-  const stopTracks = () => {
-    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-    mediaStreamRef.current = null;
-  };
-
-  const stopRecognition = (abort = false) => {
-    const recognition = recognitionRef.current;
-    if (abort) recognitionGenerationRef.current += 1;
-    try {
-      if (abort) recognition?.abort();
-      else recognition?.stop();
-    } catch { /* recognition may already be stopped */ }
-    recognitionRef.current = null;
-    setInterimTranscript('');
-  };
-
-  const clearRecordTimer = () => {
-    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-    recordTimerRef.current = null;
-  };
-
-  const releaseRecorder = useCallback((discard = false) => {
-    permissionRequestRef.current += 1;
-    permissionPendingRef.current = false;
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      discardOnStopRef.current = discard;
-      try { recorder.stop(); } catch { /* recorder already stopped */ }
-    }
-    recordingActiveRef.current = false;
-    clearRecordTimer();
-    stopTracks();
-    stopRecognition(true);
-  }, []);
-
   const resetAttemptInput = () => {
-    releaseRecorder(true);
-    replaceAudioUrl(null);
-    setAudioBlob(null);
-    setTranscript('');
-    setInterimTranscript('');
-    setTranscriptSource('manual');
-    setRecordSeconds(0);
-    setRecorderStatus('idle');
+    resetRecorder();
     setErrorMessage('');
-    setTranscriptionInterrupted(false);
-    finalTranscriptRef.current = '';
-    chunksRef.current = [];
+    resetLocalProcessing();
+    setAiError('');
   };
+
+  const chooseManualMode = () => {
+    releaseIntoManualMode();
+    setErrorMessage('');
+  };
+
+  const processLocalAudio = () => processLocalAudioBlob(audioBlob);
 
   const goTo = (next: Screen) => {
     const recorderBusy = recordingActiveRef.current || recorderStatus === 'requesting';
@@ -316,10 +189,11 @@ export default function SpeechCoach() {
     scrollTop();
   };
 
-  const startTraining = (index = topicIndex) => {
+  const startTraining = (index = topicIndex, selectedTopic?: Topic) => {
     resetAttemptInput();
-    const nextTopic = TOPICS[index];
-    setTopicIndex(index);
+    const nextTopic = selectedTopic ?? TOPICS[index];
+    setCustomTopic(selectedTopic ?? null);
+    if (!selectedTopic) setTopicIndex(index);
     setTrainingId(createId());
     setNotes('');
     setAttempts([]);
@@ -336,195 +210,6 @@ export default function SpeechCoach() {
     resetAttemptInput();
     setScreen('speak');
     scrollTop();
-  };
-
-  const startRecognition = () => {
-    const Recognition = getRecognitionConstructor();
-    if (!Recognition || !autoTranscript) return;
-    const generation = recognitionGenerationRef.current + 1;
-    recognitionGenerationRef.current = generation;
-    const recognition = new Recognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'zh-CN';
-    finalTranscriptRef.current = transcript;
-    recognition.onresult = (event) => {
-      if (generation !== recognitionGenerationRef.current) return;
-      let finalChunk = '';
-      let interimChunk = '';
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        if (result.isFinal) finalChunk += result[0].transcript;
-        else interimChunk += result[0].transcript;
-      }
-      if (finalChunk) {
-        finalTranscriptRef.current = `${finalTranscriptRef.current}${finalChunk}`;
-        setTranscript(finalTranscriptRef.current);
-        setTranscriptSource('browser');
-      }
-      setInterimTranscript(interimChunk);
-    };
-    recognition.onerror = (event) => {
-      if (generation !== recognitionGenerationRef.current) return;
-      if (event.error !== 'aborted' && event.error !== 'no-speech') {
-        setStorageMessage('自动转写已停止，录音仍在继续。结束后可以手动补充讲稿。');
-        setTranscriptionInterrupted(true);
-      }
-    };
-    recognition.onend = () => {
-      if (generation !== recognitionGenerationRef.current) return;
-      setInterimTranscript('');
-      const recorder = mediaRecorderRef.current;
-      if (recordingActiveRef.current && recorder?.state === 'recording') {
-        setTranscriptionInterrupted(true);
-        setStorageMessage('浏览器自动转写已中断，录音仍在继续；结束后请检查讲稿是否完整。');
-      }
-    };
-    try {
-      recognition.start();
-      recognitionRef.current = recognition;
-    } catch {
-      setStorageMessage('自动转写未能启动，录音仍在继续。');
-    }
-  };
-
-  const startRecording = async () => {
-    if (recorderStatus === 'requesting' || recordingActiveRef.current) return;
-    setErrorMessage('');
-    setStorageMessage('');
-    setRecorderStatus('requesting');
-    const requestToken = permissionRequestRef.current + 1;
-    permissionRequestRef.current = requestToken;
-    permissionPendingRef.current = true;
-    try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-        throw new Error('unsupported');
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      if (requestToken !== permissionRequestRef.current) {
-        permissionPendingRef.current = false;
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      permissionPendingRef.current = false;
-      mediaStreamRef.current = stream;
-      const candidates = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'];
-      const mimeType = candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate));
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      discardOnStopRef.current = false;
-      recorderFailedRef.current = false;
-      chunksRef.current = [];
-      replaceAudioUrl(null);
-      setAudioBlob(null);
-      setRecordSeconds(0);
-      pausedTotalRef.current = 0;
-      pauseStartRef.current = 0;
-      finalTranscriptRef.current = transcript;
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onerror = () => {
-        recorderFailedRef.current = true;
-        setRecorderStatus('error');
-        setErrorMessage('录音设备发生了中断。已有讲稿不会丢失，你可以重新录制或直接使用手动稿。');
-        recordingActiveRef.current = false;
-        clearRecordTimer();
-        stopRecognition(true);
-        stopTracks();
-      };
-      recorder.onstop = () => {
-        const discard = discardOnStopRef.current;
-        discardOnStopRef.current = false;
-        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
-        if (discard) {
-          chunksRef.current = [];
-        } else if (recorderFailedRef.current) {
-          chunksRef.current = [];
-        } else if (blob.size > 1000) {
-          setAudioBlob(blob);
-          const nextUrl = URL.createObjectURL(blob);
-          replaceAudioUrl(nextUrl);
-          setRecorderStatus('stopped');
-        } else {
-          setRecorderStatus('error');
-          setErrorMessage('这段录音太短或没有收到声音，请重新录制；也可以使用手动讲稿继续。');
-        }
-        recordingActiveRef.current = false;
-        clearRecordTimer();
-        stopTracks();
-        stopRecognition(false);
-      };
-      const audioTrack = stream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.onended = () => {
-          if (!recordingActiveRef.current || discardOnStopRef.current) return;
-          recorderFailedRef.current = true;
-          setErrorMessage('麦克风连接已经中断。请检查设备后重新录制，已有讲稿不会丢失。');
-          setRecorderStatus('error');
-          stopRecognition(true);
-          if (recorder.state !== 'inactive') recorder.stop();
-        };
-      }
-      recorder.start(800);
-      recordStartRef.current = monotonicNow();
-      recordingActiveRef.current = true;
-      setRecorderStatus('recording');
-      startRecognition();
-      recordTimerRef.current = setInterval(() => {
-        const now = monotonicNow();
-        const currentPause = pauseStartRef.current ? now - pauseStartRef.current : 0;
-        const elapsed = Math.max(0, Math.floor((now - recordStartRef.current - pausedTotalRef.current - currentPause) / 1000));
-        setRecordSeconds(elapsed);
-        if (elapsed >= topic.speechSeconds + 60 && recorder.state !== 'inactive') recorder.stop();
-      }, 250);
-    } catch (error) {
-      if (requestToken !== permissionRequestRef.current) return;
-      permissionPendingRef.current = false;
-      stopTracks();
-      setRecorderStatus('error');
-      const name = error instanceof DOMException ? error.name : '';
-      setErrorMessage(name === 'NotAllowedError'
-        ? '麦克风权限没有开启。你可以在浏览器地址栏旁重新授权，或者使用手动讲稿继续。'
-        : '暂时无法使用麦克风。请检查设备是否被其他应用占用，或者使用手动讲稿继续。');
-    }
-  };
-
-  const pauseRecording = () => {
-    const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state !== 'recording') return;
-    recorder.pause();
-    stopRecognition(true);
-    pauseStartRef.current = monotonicNow();
-    setRecorderStatus('paused');
-  };
-
-  const resumeRecording = () => {
-    const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state !== 'paused') return;
-    recorder.resume();
-    pausedTotalRef.current += monotonicNow() - pauseStartRef.current;
-    pauseStartRef.current = 0;
-    setRecorderStatus('recording');
-    startRecognition();
-  };
-
-  const finishRecording = () => {
-    const recorder = mediaRecorderRef.current;
-    if (!recorder || recorder.state === 'inactive') return;
-    if (pauseStartRef.current) {
-      pausedTotalRef.current += monotonicNow() - pauseStartRef.current;
-      pauseStartRef.current = 0;
-    }
-    discardOnStopRef.current = false;
-    recorder.stop();
-  };
-
-  const chooseManualMode = () => {
-    releaseRecorder(true);
-    setRecorderStatus('manual');
-    setErrorMessage('');
-    setTranscriptSource('manual');
   };
 
   const loadExample = () => {
@@ -560,6 +245,10 @@ export default function SpeechCoach() {
       createdAt: new Date().toISOString(),
       transcript: clean,
       transcriptSource,
+      transcriptResult: audioInsights?.transcriptResult
+        ? { ...audioInsights.transcriptResult, editedText: clean }
+        : undefined,
+      acousticAnalysis: audioInsights?.acousticAnalysis,
       durationSeconds: duration,
       topicVersion: topic.version,
       targetSeconds: topic.speechSeconds,
@@ -586,12 +275,13 @@ export default function SpeechCoach() {
       id: trainingId || createId(),
       topicId: topic.id,
       topicTitle: topic.title,
+      topicSnapshot: topic,
       audience: topic.audience,
       notes,
       createdAt: history.find((item) => item.id === trainingId)?.createdAt ?? now,
       updatedAt: now,
       attempts: nextAttempts,
-      schemaVersion: 1,
+      schemaVersion: 2,
     };
     const freshestHistory = loadHistory();
     const nextHistory = [currentRecord, ...freshestHistory.filter((item) => item.id !== currentRecord.id)];
@@ -606,6 +296,20 @@ export default function SpeechCoach() {
     scrollTop();
   };
 
+  const requestAiFeedback = async () => {
+    const attempt = attempts.at(-1);
+    if (!attempt) return;
+    await requestFeedback(attempt, topic, (aiScore) => {
+      const nextAttempts = attempts.map((item) => item.id === attempt.id ? { ...item, aiScore } : item);
+      setAttempts(nextAttempts);
+      if (!attempt.isDemo) {
+        const freshest = loadHistory();
+        const record = freshest.find((item) => item.id === trainingId);
+        if (record) commitHistory(freshest.map((item) => item.id === record.id ? { ...item, attempts: nextAttempts, updatedAt: new Date().toISOString() } : item));
+      }
+    });
+  };
+
   const repeatSpeech = () => {
     resetAttemptInput();
     setScreen('speak');
@@ -615,6 +319,7 @@ export default function SpeechCoach() {
   const openRecord = (record: TrainingRecord) => {
     const index = TOPICS.findIndex((item) => item.id === record.topicId);
     setTopicIndex(index >= 0 ? index : 0);
+    setCustomTopic(record.topicSnapshot ?? null);
     setTrainingId(record.id);
     setNotes(record.notes);
     setAttempts(record.attempts);
@@ -663,6 +368,7 @@ export default function SpeechCoach() {
     }
     replaceAudioUrl(null);
     replacePlaybackUrl(null);
+    clearAiProvider();
     setPlaybackId(null);
     setHistory([]);
     setAttempts([]);
@@ -670,7 +376,7 @@ export default function SpeechCoach() {
   };
 
   const exportData = () => {
-    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), records: history }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ application: '讲清楚', schemaVersion: 2, exportedAt: new Date().toISOString(), records: history }, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -678,12 +384,6 @@ export default function SpeechCoach() {
     anchor.click();
     URL.revokeObjectURL(url);
   };
-
-  const latestScores = useMemo(() => history.map((record) => record.attempts.at(-1)?.score).filter(Boolean), [history]);
-  const averageScore = latestScores.length
-    ? Math.round(latestScores.reduce((sum, score) => sum + (score?.total ?? 0), 0) / latestScores.length)
-    : 0;
-  const completeLoops = history.filter((record) => record.attempts.length > 1).length;
 
   const renderHome = () => {
     const current = TOPICS[topicIndex];
@@ -758,7 +458,22 @@ export default function SpeechCoach() {
           </article>
         ))}
       </div>
-      <div className="simulation-note"><strong>为什么使用模拟资料？</strong><p>首版只评价题内关键点覆盖，不判断陈述真假，也不声称完成开放网络事实核查。这样能减少无依据的判断。</p></div>
+      <div className="center-actions"><button className="primary-action compact" type="button" onClick={() => goTo('topic-builder')}>创建自定义题目 <span>→</span></button></div>
+      <div className="simulation-note"><strong>预设题与真实资料</strong><p>预设题仍使用模拟资料，适合稳定比较；也可以导入自己的材料，或生成保留网页引用的自定义训练题。</p></div>
+    </section>
+  );
+
+  const renderTopicBuilder = () => (
+    <section className="page-section topics-page">
+      <div className="section-heading wide"><span>自定义训练</span><h1>用自己的材料，练真正要讲的内容。</h1><p>音频始终留在本机；公开资料研究只发送你输入的议题。</p></div>
+      <TopicBuilder onUseTopic={(snapshot) => startTraining(topicIndex, fromTopicSnapshot(snapshot))} />
+    </section>
+  );
+
+  const renderAiSettings = () => (
+    <section className="page-section ai-settings-page">
+      <div className="section-heading wide"><span>BYOK · 自带密钥</span><h1>选择官方服务，或连接可信中转站。</h1><p>请求通过本站同源服务端转发，以避免浏览器 CORS 限制；密钥默认只保留在当前页面内存中。</p></div>
+      <ProviderSettings provider={aiProvider} onChange={setAiProvider} onClear={() => setAiProvider(null)} />
     </section>
   );
 
@@ -820,10 +535,14 @@ export default function SpeechCoach() {
             <div className="wave" aria-hidden="true">{Array.from({ length: 29 }).map((_, index) => <i key={index} style={{ '--bar': `${18 + ((index * 17) % 46)}px`, '--delay': `${(index % 9) * -0.11}s` } as React.CSSProperties} />)}</div>
             {!active && recorderStatus !== 'stopped' && (
               <>
-                <p className="record-intro"><strong>训练反馈依据文字稿。</strong>录音用于回听；如果不启用自动转写，录完后需要手动补充讲稿。点击后才会请求麦克风权限。</p>
+                <p className="record-intro"><strong>录音后可在本机完成高质量转写和声音分析。</strong>模型只在首次使用时下载；原始音频不会上传。</p>
+                <label className="transcript-toggle">
+                  <input type="checkbox" checked={localTranscriptionEnabled} onChange={(event) => setLocalTranscriptionEnabled(event.target.checked)} />
+                  <span><b>录音后使用本地高质量转写</b><small>优先使用 WebGPU，设备不支持时使用 WASM；首次模型下载较大</small></span>
+                </label>
                 <label className={`transcript-toggle ${!recognitionSupported ? 'disabled' : ''}`}>
                   <input type="checkbox" checked={autoTranscript} disabled={!recognitionSupported} onChange={(event) => setAutoTranscript(event.target.checked)} />
-                  <span><b>同时尝试浏览器自动转写</b><small>{recognitionSupported ? '可能由浏览器服务商在线处理语音；默认关闭' : '当前浏览器不支持，可在录音后手动输入'}</small></span>
+                  <span><b>录音时显示浏览器实时字幕草稿</b><small>{recognitionSupported ? '可能由浏览器服务商在线处理；不会作为权威转写' : '当前浏览器不支持，不影响录音后本地转写'}</small></span>
                 </label>
                 <label className="save-toggle">
                   <input type="checkbox" checked={saveRecordingLocally} onChange={(event) => setSaveRecordingLocally(event.target.checked)} />
@@ -840,7 +559,10 @@ export default function SpeechCoach() {
               </div>
             )}
             {recorderStatus === 'stopped' && audioUrl && <audio className="audio-player" aria-label={`${attempts.length ? '第二遍' : '第一遍'}录音回听`} controls src={audioUrl}>你的浏览器不支持音频播放。</audio>}
-            {finished && recorderStatus !== 'manual' && <button className="quiet-action" type="button" onClick={resetAttemptInput}>删除并重新录制</button>}
+            {recorderStatus === 'stopped' && localTranscriptionEnabled && audioBlob && !audioInsights && !transcriptionProgress && <button className="primary-action compact" type="button" onClick={processLocalAudio}>在本机转写并分析声音 <span>→</span></button>}
+            {transcriptionProgress && <div className="local-processing" role="status"><strong>{transcriptionProgress.detail}</strong><span>{transcriptionProgress.percent === null ? '请保持页面打开' : `${transcriptionProgress.percent}%`}</span><button className="quiet-action" type="button" onClick={cancelLocalProcessing}>取消</button></div>}
+            {audioInsights && <div className="transcript-required"><strong>本地声音分析已完成。</strong><span>检测到 {audioInsights.acousticAnalysis?.pauseRanges.length ?? 0} 处明显停顿；完整指标会显示在反馈页。</span></div>}
+            {finished && recorderStatus !== 'manual' && !transcriptionProgress && <button className="quiet-action" type="button" onClick={resetAttemptInput}>删除并重新录制</button>}
           </article>
           <aside className="prompt-panel">
             <div><span className="section-kicker">你的听众</span><strong>{topic.audience}</strong></div>
@@ -852,12 +574,12 @@ export default function SpeechCoach() {
 
         {(finished || transcript || interimTranscript) && (
           <section className="transcript-editor">
-            <div className="column-title"><div><h2>{transcript ? '确认讲稿' : '补充讲稿并分析'}</h2><p>{transcript ? '自动转写可能有误，请在生成反馈前校正。' : '当前没有可用转写，请根据刚才的表达补充主要内容。'}</p></div><span>{transcriptSource === 'browser' ? '浏览器转写' : transcriptSource === 'edited' ? '已人工修订' : recorderStatus === 'manual' ? '文本演练' : '手动输入'}</span></div>
+            <div className="column-title"><div><h2>{transcript ? '确认讲稿' : '补充讲稿并分析'}</h2><p>{transcriptSource === 'local-whisper' ? '本地模型也可能识别有误，请在生成反馈前校正。' : transcript ? '实时字幕可能有误，请在生成反馈前校正。' : '当前没有可用转写，请根据刚才的表达补充主要内容。'}</p></div><span>{transcriptSource === 'local-whisper' ? '本地 Whisper' : transcriptSource === 'browser' ? '浏览器字幕草稿' : transcriptSource === 'edited' ? '已人工修订' : recorderStatus === 'manual' ? '文本演练' : '手动输入'}</span></div>
             {recorderStatus === 'stopped' && !transcript && <div className="transcript-required"><strong>录音已经完成，但反馈还需要文字稿。</strong><span>请补充主要内容并分析，或者删除这段录音后重新开始。</span></div>}
             {transcriptionInterrupted && <div className="transcript-required warning"><strong>自动转写可能不完整。</strong><span>录音过程中转写曾中断，请先对照回听并补齐后半段。</span></div>}
             {interimTranscript && <p className="interim">正在识别：{interimTranscript}</p>}
             <label className="visually-hidden" htmlFor="transcript">演说讲稿</label>
-            <textarea id="transcript" value={transcript} onChange={(event) => { const next = event.target.value; setTranscript(next); finalTranscriptRef.current = next; setTranscriptSource((current) => current === 'browser' || current === 'edited' ? 'edited' : 'manual'); if (demoMode) setDemoMode(false); }} placeholder="在这里粘贴或输入你刚才的演说内容。讲稿不会上传到本站服务器。" />
+            <textarea id="transcript" value={transcript} onChange={(event) => { const next = event.target.value; setTranscript(next); finalTranscriptRef.current = next; setTranscriptSource((current) => current === 'browser' || current === 'edited' || current === 'local-whisper' ? 'edited' : 'manual'); if (demoMode) setDemoMode(false); }} placeholder="在这里粘贴或输入你刚才的演说内容。只有你明确授权 AI 深度反馈时，讲稿才会发送到应用服务器。" />
             <div className="editor-actions"><button className="quiet-action inline" type="button" onClick={loadExample}>预览示例反馈（不计入记录）</button><button className="primary-action compact" type="button" onClick={analyze} disabled={isAnalyzing}>{isAnalyzing ? '正在分析…' : attempts.length ? '生成前后对比' : '生成训练反馈'} <span>→</span></button></div>
           </section>
         )}
@@ -875,7 +597,7 @@ export default function SpeechCoach() {
         <Notices error={errorMessage} info={storageMessage} onDismiss={() => setStorageMessage('')} />
         <div className="report-hero">
           <div className="score-ring" style={{ '--score': `${score.total * 3.6}deg` } as React.CSSProperties}><div><strong>{score.total}</strong><span>规则量表估算</span></div></div>
-          <div className="report-summary"><span className="section-kicker">第 3 步 · 查看反馈</span><h1>{attempt.isDemo ? '这是一份示例反馈。' : '这次，你已经讲清了什么？'}</h1><p>整体处于“{score.level}”阶段。本次主要依据关键点、结构信号、资料线索和文本长度；不会判断事实真假，也没有分析音量、语调或眼神。无法判断的维度会从总分计算中排除。</p><div className="confidence-row"><span>{score.confidence}</span><span>{score.rubricVersion}</span><span>{attempt.transcriptSource === 'browser' ? '浏览器转写' : attempt.transcriptSource === 'edited' ? '人工修订稿' : '手动讲稿'}</span></div></div>
+          <div className="report-summary"><span className="section-kicker">第 3 步 · 查看反馈</span><h1>{attempt.isDemo ? '这是一份示例反馈。' : '这次，你已经讲清了什么？'}</h1><p>整体处于“{score.level}”阶段。本地规则分用于稳定重讲比较；声音指标来自本机录音。你还可以明确授权 Claude 阅读讲稿、题目资料和聚合声音指标，获得语义深度反馈。原始音频始终不会发送。</p><div className="confidence-row"><span>{score.confidence}</span><span>{score.rubricVersion}</span><span>{attempt.transcriptSource === 'local-whisper' ? '本地 Whisper' : attempt.transcriptSource === 'browser' ? '浏览器字幕' : attempt.transcriptSource === 'edited' ? '人工修订稿' : '手动讲稿'}</span></div></div>
         </div>
 
         <div className="report-layout">
@@ -897,6 +619,12 @@ export default function SpeechCoach() {
                 : <button className="quiet-action bordered" type="button" onClick={() => loadPlayback(attempt.id)}>加载本地录音</button>)}
           </aside>
         </div>
+
+        {attempt.acousticAnalysis && <section className="acoustic-section"><div className="section-heading left"><span>本机声音指标</span><h2>系统真正听到了哪些可观察信号</h2><p>这些指标受麦克风、房间噪声、压缩和个人声线影响，只适合同设备训练参考。</p></div><div className="acoustic-grid">{attempt.acousticAnalysis.metrics.filter((metric) => metric.available).map((metric) => <article key={metric.id}><span>{metric.label}</span><strong>{metric.value === null ? '—' : Number(metric.value.toFixed(1))} {metric.unit}</strong><p>{metric.limitation}</p></article>)}</div>{attempt.acousticAnalysis.warnings.map((warning) => <div className="compare-warning" key={warning}>{warning}</div>)}</section>}
+
+        {!attempt.isDemo && !attempt.aiScore && <section className="ai-consent-panel"><div><span className="section-kicker">可选 · AI 深度反馈</span><h2>{aiProvider ? `使用 ${aiProvider.model} 理解论证。` : '先配置 AI 服务，再生成深度反馈。'}</h2><p>{aiProvider ? '只发送当前讲稿、题目与引用资料、聚合声音指标。所选服务商或中转站能够读取这些内容和本次请求中的 API Key；不会发送录音、其他历史或设备标识。' : '支持 DeepSeek、Anthropic 以及 OpenAI/Anthropic 兼容中转站。API Key 默认只保留在当前页面内存。'}</p></div>{aiProvider ? <><label><input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} /><span>我理解并同意把上述文字与指标发送给所选服务商用于本次分析</span></label><button className="primary-action compact" type="button" disabled={!aiConsent || aiAnalyzing} onClick={requestAiFeedback}>{aiAnalyzing ? '正在生成语义反馈…' : '生成 AI 深度反馈'} <span>→</span></button></> : <button className="primary-action compact" type="button" onClick={() => goTo('ai-settings')}>配置 AI 服务 <span>→</span></button>}{aiError && <div className="notice error" role="alert">{aiError}</div>}</section>}
+
+        {attempt.aiScore?.result && <section className="ai-feedback-section"><div className="section-heading left"><span>AI 深度反馈 · {attempt.aiScore.model}</span><h2>论证、证据与听众适配</h2><p>{attempt.aiScore.result.overallSummary}</p></div><div className="semantic-grid">{attempt.aiScore.result.dimensions.map((dimension) => <article key={dimension.key}><span>{dimension.label}</span><strong>{dimension.score ?? '—'}</strong><p>{dimension.summary}</p></article>)}</div><div className="feedback-grid">{attempt.aiScore.result.improvements.map((item, index) => <article className="feedback-card" key={item.title}><div className="feedback-number">A{index + 1}</div><h3>{item.title}</h3><dl><dt>观察</dt><dd>{item.observation}</dd><dt>下一遍这样改</dt><dd>{item.action}</dd></dl><div className="micro-drill"><span>专项练习</span><p>{item.drill}</p></div></article>)}</div><div className="compare-warning">{attempt.aiScore.result.limitations.join(' ')}</div></section>}
 
         {score.strengths.length > 0 && <section className="strength-section"><div className="section-heading left"><span>相对较完整的部分</span><h2>这两处可以继续保留</h2></div><div className="strength-grid">{score.strengths.map((strength) => <article key={strength.title}><span>✓</span><h3>{strength.title}</h3><p>{strength.detail}</p><blockquote>“{strength.quote}”</blockquote></article>)}</div></section>}
 
@@ -943,16 +671,18 @@ export default function SpeechCoach() {
       <div className="dashboard-stats"><article><span>训练记录</span><strong>{history.length}</strong><p>每个题目算一次</p></article><article><span>完整闭环</span><strong>{completeLoops}</strong><p>完成反馈后重讲</p></article><article><span>累计开口</span><strong>{history.reduce((sum, item) => sum + item.attempts.length, 0)}</strong><p>所有录音或手动稿</p></article><article><span>近期参考分</span><strong>{averageScore || '—'}</strong><p>不同题目不作排名</p></article></div>
       <div className="history-heading"><div><span className="section-kicker">本机记录</span><h2>训练历史</h2></div><div><button type="button" onClick={exportData} disabled={!history.length}>导出文本与评分</button><button className="danger-link" type="button" onClick={clearEverything} disabled={!history.length}>清除全部</button></div></div>
       {history.length ? <div className="history-list">{history.map((record) => { const first = record.attempts[0]; const latest = record.attempts.at(-1); const comparable = attemptsComparable(first, latest); const delta = first && latest ? latest.score.total - first.score.total : 0; return <article key={record.id}><button className="history-main" type="button" onClick={() => openRecord(record)}><div className="history-date"><span>{formatDate(record.updatedAt)}</span><em>{record.attempts.length > 1 ? '已重讲' : '待重讲'}</em></div><h3>{record.topicTitle}</h3><p>面向：{record.audience}</p><div className="history-scores"><strong>{latest?.score.total ?? '—'}</strong><span>最近量表估算</span>{record.attempts.length > 1 && <em className={comparable && delta >= 0 ? 'up' : ''}>{comparable ? `${delta > 0 ? '+' : ''}${delta}` : '不可直比'}</em>}</div></button><button className="delete-record" type="button" onClick={() => deleteRecord(record)} aria-label={`删除训练：${record.topicTitle}`}>删除</button></article>;})}</div> : <div className="empty-state"><span aria-hidden="true">◌</span><h2>还没有训练记录</h2><p>完成一次演说后，讲稿、反馈和量表估算会保存在这台设备。</p><button className="primary-action" type="button" onClick={() => goTo('topics')}>选择第一道题 <span>→</span></button></div>}
-      <div className="privacy-panel"><div><span className="section-kicker">本地优先</span><h2>默认只存当前浏览器，随时可以删除。</h2></div><ul><li>本站无需登录，不会把录音或讲稿上传到应用服务器。</li><li>文本与评分保存在浏览器本地；只有开启保存选项时，录音才会写入本地录音库。</li><li>如果主动开启浏览器自动转写，语音可能由浏览器服务商在线处理。</li><li>共享设备上的其他使用者可能看到本地记录，请按需要导出或清除。</li></ul></div>
+      <div className="privacy-panel"><div><span className="section-kicker">本地优先</span><h2>音频、转写与声音分析默认都在本机完成。</h2></div><ul><li>原始录音永不上传；只有开启保存选项时，才写入这台设备的本地录音库。</li><li>本地 Whisper 模型首次使用时从模型仓库下载，之后由浏览器缓存；转写和声音分析在设备上运行。</li><li>AI 服务 Key 默认只留在当前页面内存；可选择仅当前标签页保存，不进入历史、音频库或导出文件。</li><li>只有明确授权 AI 深度反馈时，当前讲稿、题目资料和聚合声音指标才会发送给所选服务商或中转站。</li><li>公开资料研究使用本站单独配置的研究服务，不会使用你填写的中转站 Key。</li><li>共享设备上的其他使用者可能看到本地记录，请按需要导出或清除。</li></ul></div>
     </section>
   );
 
   return (
     <div className="app-shell">
-      <AppHeader screen={screen} onNavigate={goTo} />
+      <AppHeader screen={screen} onNavigate={goTo} providerReady={Boolean(aiProvider)} />
       <main id="main-content" ref={mainRef} tabIndex={-1}>
         {screen === 'home' && renderHome()}
         {screen === 'topics' && renderTopics()}
+        {screen === 'topic-builder' && renderTopicBuilder()}
+        {screen === 'ai-settings' && renderAiSettings()}
         {screen === 'progress' && renderProgress()}
         {screen === 'prepare' && renderPrepare()}
         {screen === 'speak' && renderSpeak()}

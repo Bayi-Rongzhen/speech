@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import ServiceWorkerRegistration from './features/training/service-worker-registration';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -33,7 +34,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body><ServiceWorkerRegistration />{children}</body>
     </html>
   );
 }
