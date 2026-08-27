@@ -1,6 +1,10 @@
+import type { AcousticAnalysis, TranscriptResult } from './schemas/audio';
+import type { AiScoreRun } from './schemas/coaching';
+
 export type Topic = {
   id: string;
   version: number;
+  origin?: 'preset' | 'custom' | 'researched';
   category: string;
   title: string;
   audience: string;
@@ -8,8 +12,21 @@ export type Topic = {
   prepMinutes: number;
   speechSeconds: number;
   difficulty: '入门' | '进阶' | '挑战';
-  sources: Array<{ label: string; title: string; body: string }>;
+  sources: Array<{
+    id?: string;
+    kind?: 'simulated' | 'user' | 'web';
+    status?: 'simulated' | 'user-provided' | 'retrieved' | 'limited';
+    label: string;
+    title: string;
+    body: string;
+    url?: string;
+    publisher?: string;
+    retrievedAt?: string;
+    citedText?: string;
+  }>;
   keywords: string[];
+  keywordGroups?: string[][];
+  createdAt?: string;
 };
 
 export type DimensionKey = 'content' | 'structure' | 'evidence' | 'clarity' | 'delivery' | 'timing';
@@ -57,7 +74,10 @@ export type AttemptRecord = {
   id: string;
   createdAt: string;
   transcript: string;
-  transcriptSource: 'browser' | 'manual' | 'edited';
+  transcriptSource: 'browser' | 'manual' | 'edited' | 'local-whisper';
+  transcriptResult?: TranscriptResult;
+  acousticAnalysis?: AcousticAnalysis;
+  aiScore?: AiScoreRun;
   durationSeconds: number;
   topicVersion: number;
   targetSeconds: number;
@@ -70,10 +90,11 @@ export type TrainingRecord = {
   id: string;
   topicId: string;
   topicTitle: string;
+  topicSnapshot?: Topic;
   audience: string;
   notes: string;
   createdAt: string;
   updatedAt: string;
   attempts: AttemptRecord[];
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
 };

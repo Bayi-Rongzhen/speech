@@ -23,7 +23,7 @@ export function loadHistory(): TrainingRecord[] {
         && Number.isFinite(new Date(candidate.createdAt).getTime())
         && typeof candidate.updatedAt === 'string'
         && Number.isFinite(new Date(candidate.updatedAt).getTime())
-        && candidate.schemaVersion === 1
+        && (candidate.schemaVersion === 1 || candidate.schemaVersion === 2)
         && Array.isArray(candidate.attempts)
         && candidate.attempts.length > 0
         && candidate.attempts.every((attempt) => Boolean(
@@ -32,7 +32,7 @@ export function loadHistory(): TrainingRecord[] {
           && typeof attempt.createdAt === 'string'
           && Number.isFinite(new Date(attempt.createdAt).getTime())
           && typeof attempt.transcript === 'string'
-          && ['browser', 'manual', 'edited'].includes(attempt.transcriptSource)
+          && ['browser', 'manual', 'edited', 'local-whisper'].includes(attempt.transcriptSource)
           && typeof attempt.durationSeconds === 'number'
           && typeof attempt.topicVersion === 'number'
           && typeof attempt.targetSeconds === 'number'

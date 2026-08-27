@@ -139,7 +139,7 @@ export function scoreSpeech(
   durationSeconds: number,
   durationEstimated: boolean,
   topic: Topic,
-  transcriptSource: 'browser' | 'manual' | 'edited' = 'manual',
+  transcriptSource: 'browser' | 'manual' | 'edited' | 'local-whisper' = 'manual',
 ): ScoreResult {
   const text = rawText.replace(/\s+/g, ' ').trim();
   const units = countSpeechUnits(text);
@@ -149,19 +149,22 @@ export function scoreSpeech(
   const structureSignals = countTerms(text, STRUCTURE_MARKERS);
   const evidenceSignals = countTerms(text, EVIDENCE_MARKERS) + (text.match(/\d+(?:\.\d+)?%?/g)?.length ?? 0);
   const audienceSignals = countTerms(text, AUDIENCE_MARKERS);
-  const coveredKeywords = topic.keywords.filter((keyword) => text.includes(keyword));
-  const missingKeywords = topic.keywords.filter((keyword) => !text.includes(keyword));
-  const keywordCoverage = Math.round((coveredKeywords.length / topic.keywords.length) * 100);
+  const keywordGroups = topic.keywordGroups ?? topic.keywords.map((keyword) => [keyword]);
+  const coveredGroups = keywordGroups.filter((group) => group.some((keyword) => text.includes(keyword)));
+  const missingKeywords = keywordGroups
+    .filter((group) => !group.some((keyword) => text.includes(keyword)))
+    .map((group) => group[0]);
+  const keywordCoverage = Math.round((coveredGroups.length / Math.max(keywordGroups.length, 1)) * 100);
   const sentences = sentenceList(text);
   const averageSentence = units / Math.max(sentences.length, 1);
   const punctuationCount = text.match(/[。！？!?；;\n]/g)?.length ?? 0;
   const lengthFactor = Math.min(units / 360, 1);
-  const deliveryAvailable = !durationEstimated && transcriptSource === 'browser';
+  const deliveryAvailable = !durationEstimated && (transcriptSource === 'browser' || transcriptSource === 'local-whisper');
   const timingAvailable = !durationEstimated;
 
   let content = clamp(38 + keywordCoverage * .42 + lengthFactor * 16);
   let structure = clamp(39 + Math.min(structureSignals, 5) * 8 + (/观点|认为|建议|应该/.test(text.slice(0, 100)) ? 10 : 0) + (/因此|总之|最后|综上|所以/.test(text.slice(-130)) ? 11 : 0));
-  let evidence = clamp(36 + Math.min(evidenceSignals, 7) * 6 + Math.min(coveredKeywords.length, 4) * 4);
+  let evidence = clamp(36 + Math.min(evidenceSignals, 7) * 6 + Math.min(coveredGroups.length, 4) * 4);
   const sentencePenalty = punctuationCount >= 2
     ? averageSentence > 62 ? Math.min(12, (averageSentence - 62) * .28) : averageSentence < 8 ? 6 : 0
     : 0;
