@@ -8,6 +8,7 @@ import TopicBuilder from './features/topics/topic-builder';
 import { useAiFeedback } from './features/training/hooks/use-ai-feedback';
 import { useLocalProcessing } from './features/training/hooks/use-local-processing';
 import { useRecorder } from './features/training/hooks/use-recorder';
+import DimensionTrends from './features/training/dimension-trends';
 import { useTrainingHistory } from './features/training/hooks/use-training-history';
 import { attemptsComparable } from './lib/domain/comparability';
 import { fromTopicSnapshot } from './lib/domain/topics';
@@ -100,7 +101,7 @@ export default function SpeechCoach() {
   const mainRef = useRef<HTMLElement | null>(null);
   const initialScreenRef = useRef(true);
 
-  const { history, historyReady, commitHistory, averageScore, completeLoops, setHistory } = useTrainingHistory(
+  const { history, historyReady, commitHistory, averageScore, completeLoops, setHistory, dimensionTrends } = useTrainingHistory(
     () => setStorageMessage('浏览器未能保存记录，请先复制讲稿或检查可用空间。'),
   );
 
@@ -669,6 +670,7 @@ export default function SpeechCoach() {
       <Notices error={errorMessage} info={storageMessage} onDismiss={() => setStorageMessage('')} />
       <div className="section-heading wide"><span>仅保存在当前浏览器</span><h1>成长不是一个分数，<br />而是一连串可见的变化。</h1><p>跨题目的估算只作参考；同题、同量表、同输入方式的两次表现最值得比较。</p></div>
       <div className="dashboard-stats"><article><span>训练记录</span><strong>{history.length}</strong><p>每个题目算一次</p></article><article><span>完整闭环</span><strong>{completeLoops}</strong><p>完成反馈后重讲</p></article><article><span>累计开口</span><strong>{history.reduce((sum, item) => sum + item.attempts.length, 0)}</strong><p>所有录音或手动稿</p></article><article><span>近期参考分</span><strong>{averageScore || '—'}</strong><p>不同题目不作排名</p></article></div>
+      <DimensionTrends trends={dimensionTrends} />
       <div className="history-heading"><div><span className="section-kicker">本机记录</span><h2>训练历史</h2></div><div><button type="button" onClick={exportData} disabled={!history.length}>导出文本与评分</button><button className="danger-link" type="button" onClick={clearEverything} disabled={!history.length}>清除全部</button></div></div>
       {history.length ? <div className="history-list">{history.map((record) => { const first = record.attempts[0]; const latest = record.attempts.at(-1); const comparable = attemptsComparable(first, latest); const delta = first && latest ? latest.score.total - first.score.total : 0; return <article key={record.id}><button className="history-main" type="button" onClick={() => openRecord(record)}><div className="history-date"><span>{formatDate(record.updatedAt)}</span><em>{record.attempts.length > 1 ? '已重讲' : '待重讲'}</em></div><h3>{record.topicTitle}</h3><p>面向：{record.audience}</p><div className="history-scores"><strong>{latest?.score.total ?? '—'}</strong><span>最近量表估算</span>{record.attempts.length > 1 && <em className={comparable && delta >= 0 ? 'up' : ''}>{comparable ? `${delta > 0 ? '+' : ''}${delta}` : '不可直比'}</em>}</div></button><button className="delete-record" type="button" onClick={() => deleteRecord(record)} aria-label={`删除训练：${record.topicTitle}`}>删除</button></article>;})}</div> : <div className="empty-state"><span aria-hidden="true">◌</span><h2>还没有训练记录</h2><p>完成一次演说后，讲稿、反馈和量表估算会保存在这台设备。</p><button className="primary-action" type="button" onClick={() => goTo('topics')}>选择第一道题 <span>→</span></button></div>}
       <div className="privacy-panel"><div><span className="section-kicker">本地优先</span><h2>音频、转写与声音分析默认都在本机完成。</h2></div><ul><li>原始录音永不上传；只有开启保存选项时，才写入这台设备的本地录音库。</li><li>本地 Whisper 模型首次使用时从模型仓库下载，之后由浏览器缓存；转写和声音分析在设备上运行。</li><li>AI 服务 Key 默认只留在当前页面内存；可选择仅当前标签页保存，不进入历史、音频库或导出文件。</li><li>只有明确授权 AI 深度反馈时，当前讲稿、题目资料和聚合声音指标才会发送给所选服务商或中转站。</li><li>公开资料研究使用本站单独配置的研究服务，不会使用你填写的中转站 Key。</li><li>共享设备上的其他使用者可能看到本地记录，请按需要导出或清除。</li></ul></div>

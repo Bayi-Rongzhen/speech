@@ -2,7 +2,7 @@ import type { DimensionKey, FeedbackItem, ScoreDimension, ScoreResult, Topic } f
 
 export const RUBRIC_VERSION = '本地训练量表 1.1';
 
-const DIMENSION_META: Array<{ key: DimensionKey; label: string; weight: number }> = [
+export const DIMENSION_META: Array<{ key: DimensionKey; label: string; weight: number }> = [
   { key: 'content', label: '内容理解', weight: 25 },
   { key: 'structure', label: '结构逻辑', weight: 20 },
   { key: 'evidence', label: '论据运用', weight: 20 },
