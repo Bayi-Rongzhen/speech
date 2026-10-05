@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "project_id": "96b9e0fc-de3d-41e7-b47e-3a1f3f84fec8",
+  "spec_version": "0.1.0",
+  "documents": [
+    "README.md",
+    "AGENTS.md",
+    "docs/PROJECT_SPEC.md",
+    "docs/RELEASE.md"
+  ],
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "title": "完成限时准备、演说、反馈和同题重讲闭环",
+      "status": "pending"
+    },
+    {
+      "id": "REQ-002",
+      "title": "原始录音留在本机且外发反馈前取得明确同意",
+      "status": "pending"
+    },
+    {
+      "id": "REQ-003",
+      "title": "在浏览器内完成转写、声音分析和可复现量表评分",
+      "status": "pending"
+    },
+    {
+      "id": "REQ-004",
+      "title": "通过受限同源转发支持用户自带 AI 服务凭据",
+      "status": "pending"
+    },
+    {
+      "id": "REQ-005",
+      "title": "保存、比较和导出本地训练记录",
+      "status": "pending"
+    },
+    {
+      "id": "REQ-006",
+      "title": "提供可安装且具备离线外壳的响应式 PWA",
+      "status": "pending"
+    },
+    {
+      "id": "REQ-007",
+      "title": "建立可追溯的自动验证、Sites 发布和回滚流程",
+      "status": "suggested"
+    }
+  ],
+  "acceptance": [
+    "用户可以围绕同一题目完成准备、首次表达、反馈和重讲，并查看可比较的变化。",
+    "原始录音不会发送给 AI 服务商；发送讲稿和聚合声音指标前必须取得用户明确同意。",
+    "没有录音或可靠声音数据时，系统不会伪造语速、口头禅或声音维度结论。",
+    "BYOK 请求只接受安全的公网 HTTPS 服务地址，拒绝私网、IP、重定向和未授权请求头。",
+    "训练记录可在本机查看和导出；删除单条记录与清空数据具有明确确认和结果反馈。",
+    "每个正式版本都能关联到通过代码检查、测试和生产构建的提交，并保留可执行回滚点。"
+  ]
+}

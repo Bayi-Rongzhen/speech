@@ -10,7 +10,8 @@
     "build": "vinext build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern .claude/worktrees",
-    "test": "node --experimental-strip-types --test app/lib/scoring.test.ts app/lib/domain/coaching.test.ts app/features/audio-analysis/analyze.test.ts app/lib/schemas/ai-provider.test.ts app/lib/server/ai-relay.test.ts"
+    "test": "node --experimental-strip-types --test app/lib/scoring.test.ts app/lib/domain/coaching.test.ts app/features/audio-analysis/analyze.test.ts app/lib/schemas/ai-provider.test.ts app/lib/server/ai-relay.test.ts",
+    "verify": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.121.0",

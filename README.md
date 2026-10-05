@@ -89,7 +89,14 @@ npm run build    # 创建生产构建
 npm run start    # 启动生产服务
 npm run lint     # 代码检查
 npm test         # 运行评分、音频、Schema 与转发安全测试
+npm run verify   # 依次执行代码检查、测试与生产构建
 ```
+
+## 发布与协作
+
+每个 Pull Request 和 `main` 分支提交都会在 GitHub Actions 中执行完整验证。正式发布使用 OpenAI Sites：先合并通过验证的提交，再将同一提交同步到 Sites、保存版本并部署；部署完成后核对线上地址、核心训练流程和实际提交号。环境变量、回滚和验收记录要求见 [`docs/RELEASE.md`](docs/RELEASE.md)。
+
+社团工作台使用 `.workbench/project.json` 与 [`docs/PROJECT_SPEC.md`](docs/PROJECT_SPEC.md) 作为规范索引。规范草稿、立项批准、GitHub 合并、Sites 部署和人工验收分别留痕，任何一步都不能替代其他步骤。
 
 ## 技术结构
 
