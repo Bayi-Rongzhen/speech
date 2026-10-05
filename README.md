@@ -58,7 +58,7 @@ BYOK 请求通过本站同源服务端转发。转发层要求同源 JSON 请求
 ### 启动项目
 
 ```bash
-git clone https://github.com/berry00615/speech.git
+git clone https://github.com/Bayi-Rongzhen/speech.git
 cd speech
 npm install
 npm run dev
